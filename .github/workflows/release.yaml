@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  create-release:
+    name: Create release
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.release.outputs.upload_url }}
+      comix_version: ${{ env.COMIX_VERSION }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Get the release version
+        shell: bash
+        if: env.COMIX_VERSION == ''
+        run: |
+          echo "COMIX_VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          echo "COMIX version is: ${{ env.COMIX_VERSION }}"
+      - name: Generate a changelog
+        id: changelog
+        uses: orhun/git-cliff-action@v3
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: CHANGELOG.md
+      - name: Release
+        id: release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: CHANGELOG.md
+  build-release:
+    name: Build release assets
+    needs: [create-release]
+    permissions:
+      contents: write
+    runs-on: ${{ matrix.os }}
+    env:
+      RUST_BACKTRACE: 1
+    strategy:
+      matrix:
+        build: [macos, macos-arm]
+        include:
+          - build: macos
+            os: macos-latest
+            rust: stable
+            target: x86_64-apple-darwin
+          - build: macos-arm
+            os: macos-latest
+            rust: stable
+            target: aarch64-apple-darwin
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+      - name: Build package
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Build archive
+        shell: bash
+        run: |
+          STAGING="comix-${{ needs.create-release.outputs.comix_version }}-${{ matrix.target }}"
+          mkdir -p "${STAGING}"
+
+          cp README.md "${STAGING}/"
+
+          cp "target/${{ matrix.target }}/release/comix" "${STAGING}/"
+          tar czf "${STAGING}.tar.gz" "${STAGING}"
+          echo "ASSET=${STAGING}.tar.gz" >> $GITHUB_ENV
+      - name: Upload release archive
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ env.ASSET }}
+          asset_name: ${{ env.ASSET }}
+          tag: ${{ needs.create-release.outputs.comix_version }}
