@@ -6,7 +6,7 @@ use std::vec;
 
 use anyhow::Result;
 use csv::Reader;
-use geojson::{Feature, FeatureCollection, Geometry, JsonObject, Value};
+use geojson::{feature, Feature, FeatureCollection, Geometry, JsonObject, Value};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -23,10 +23,6 @@ struct RoutePoint {
     procedure_name: String,
     #[serde(rename = "RNAV_FLAG")]
     rnav_flag: String,
-    #[serde(rename = "ROUTE_NAME")]
-    route_name: String,
-    #[serde(rename = "ROUTE_PORTION_TYPE")]
-    route_portion_type: String,
 }
 
 pub fn write_lines(args: BuildArgs) -> Result<()> {
@@ -43,6 +39,7 @@ pub fn write_lines(args: BuildArgs) -> Result<()> {
 
     let mut p = points.iter().peekable();
     let mut features: Vec<Feature> = vec![];
+    let mut lines: Option<Vec<Vec<Vec<f64>>>> = None;
     let mut verts: Option<Vec<Vec<f64>>> = None;
 
     while let Some(point) = p.next() {
@@ -58,27 +55,36 @@ pub fn write_lines(args: BuildArgs) -> Result<()> {
         }
 
         if next_point.is_none() || next_point.unwrap().point_sequence == 10 {
+            match lines {
+                None => {
+                    lines = Some(vec![verts.unwrap()]);
+                }
+                Some(ref mut l) => {
+                    l.push(verts.unwrap());
+                }
+            }
+            verts = None;
+
+            if next_point.is_some() && next_point.unwrap().procedure_name == point.procedure_name {
+                continue;
+            }
+
             features.push(Feature {
                 bbox: None,
-                geometry: Some(Geometry::new(Value::LineString(verts.unwrap()))),
-                id: None,
+                geometry: Some(Geometry::new(Value::MultiLineString(lines.unwrap()))),
+                id: Some(feature::Id::String(point.procedure_name.clone())),
                 properties: Some({
                     let mut properties = JsonObject::new();
                     properties.insert(
-                        "procedure_name".to_string(),
+                        "name".to_string(),
                         procedure_name(&point.procedure_name, &point.amendment_number).into(),
                     );
                     properties.insert("rnav".to_string(), point.rnav_flag.clone().into());
-                    properties.insert("route_name".to_string(), point.route_name.clone().into());
-                    properties.insert(
-                        "route_portion_type".to_string(),
-                        point.route_portion_type.clone().into(),
-                    );
                     properties
                 }),
                 foreign_members: None,
             });
-            verts = None;
+            lines = None;
         }
     }
 
