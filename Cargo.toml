@@ -18,4 +18,4 @@ csv = "1.3.0"
 # Write GeoJSON format
 geojson = "0.24.1"
 # Use serde for custom derive functionality
-serde = { version = "1.0.210", features = ["derive"] }
+serde = { version = "1.0.214", features = ["derive"] }
